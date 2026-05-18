@@ -1091,6 +1091,26 @@ past_kv = (xk, xv) <span class="kw">if</span> use_cache <span class="kw">else</s
     )</pre>
 
       <p><strong>The trick</strong>: <code class="inline-code">expand()</code> is a view, <strong>not a memory copy</strong>. The actual cache still holds only 2 KV heads. The broadcast to 8 exists only as a logical view at compute time and gets fused away inside the attention kernel.</p>
+
+      <h3>🆚 GQA vs MQA — Why GQA Strictly Dominates MQA</h3>
+
+      <table>
+        <thead><tr><th>Variant</th><th>Q heads</th><th>KV heads (G)</th><th>KV cache size</th><th>Quality</th></tr></thead>
+        <tbody>
+          <tr><td><strong>MHA</strong></td><td>H</td><td>H (one-to-one)</td><td><code class="inline-code">H × seq_len × d</code></td><td>Highest</td></tr>
+          <tr><td><strong>MQA</strong></td><td>H</td><td>1 (all shared)</td><td><code class="inline-code">1 × seq_len × d</code></td><td>Noticeably degraded</td></tr>
+          <tr><td><strong>GQA</strong> ✅</td><td>H</td><td>G (1 &lt; G &lt; H)</td><td><code class="inline-code">G × seq_len × d</code></td><td>Near MHA</td></tr>
+        </tbody>
+      </table>
+
+      <p>MQA (Multi-Query Attention) is the extreme edge of the GQA design space: G = 1, meaning all Q heads share the <strong>exact same</strong> KV pair. The problem: 8 Q heads each bring a different "question," yet only one K/V "memory" answers all of them. <strong>The expressiveness bottleneck is on the KV side</strong>, and experiments show measurable quality loss on long-context and complex reasoning tasks.</p>
+
+      <p>With GQA at G=2, each KV head covers a narrower semantic subspace, which is enough to recover most of that quality — while the cache is still only 1/4 of MHA. That's the sweet spot.</p>
+
+      <div class="callout warn">
+        <div class="callout-title">📜 Historical context</div>
+        MQA was proposed by Shazeer in 2019; GQA followed from Ainslie et al. in 2023 — four years later. Today, LLaMA-2/3, Mistral, and Gemma all use GQA; MQA survives only in extreme memory-constrained edge deployments. The practical consensus is <strong>H/G = 4–8 as the sweet spot</strong>: larger G approaches MHA quality, smaller G saves more memory.
+      </div>
     </section>
 
 

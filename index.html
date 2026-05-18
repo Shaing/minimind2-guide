@@ -1092,6 +1092,26 @@ past_kv = (xk, xv) <span class="kw">if</span> use_cache <span class="kw">else</s
     )</pre>
 
       <p><strong>關鍵</strong>：<code class="inline-code">expand()</code> 是 view 操作，<strong>不複製記憶體</strong>。實際 cache 仍只有 2 個 KV 頭。擴展到 8 頭只在計算時作為「邏輯視圖」存在，並被 attention kernel 融合掉。</p>
+
+      <h3>🆚 GQA vs MQA — 為什麼 GQA 嚴格優於 MQA？</h3>
+
+      <table>
+        <thead><tr><th>方案</th><th>Q 頭</th><th>KV 頭 (G)</th><th>KV cache 大小</th><th>品質</th></tr></thead>
+        <tbody>
+          <tr><td><strong>MHA</strong></td><td>H</td><td>H（一對一）</td><td><code class="inline-code">H × seq_len × d</code></td><td>最高</td></tr>
+          <tr><td><strong>MQA</strong></td><td>H</td><td>1（全共用）</td><td><code class="inline-code">1 × seq_len × d</code></td><td>明顯下降</td></tr>
+          <tr><td><strong>GQA</strong> ✅</td><td>H</td><td>G（1 &lt; G &lt; H）</td><td><code class="inline-code">G × seq_len × d</code></td><td>接近 MHA</td></tr>
+        </tbody>
+      </table>
+
+      <p>MQA（Multi-Query Attention）是 GQA 的極端特例：G = 1，所有 Q 頭共用<strong>同一組</strong> KV。問題在於——8 個 Q 頭各自帶著不同的「問法」，卻只有一份 K/V「記憶」回應，<strong>表達能力的瓶頸卡在 KV 端</strong>，實驗上在長上下文與複雜推理任務上品質下降明顯。</p>
+
+      <p>GQA 的 G=2 已足夠讓每組 KV 頭承擔更窄的語意子空間，同時 cache 仍是 MHA 的 1/4。這是記憶體效率與模型品質之間的甜蜜點。</p>
+
+      <div class="callout warn">
+        <div class="callout-title">📜 歷史脈絡</div>
+        MQA 由 Shazeer 於 2019 年提出，GQA 由 Ainslie et al. 於 2023 年才跟進。業界用了 4 年才找到更好的折中方案。現在 LLaMA-2/3、Mistral、Gemma 全部採用 GQA；MQA 僅在極端記憶體受限的邊緣設備場景仍有使用。實務上 <strong>H/G = 4–8 是公認的甜蜜點</strong>——G 越大越接近 MHA 品質，G 越小越省記憶體。
+      </div>
     </section>
 
 
