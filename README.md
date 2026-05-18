@@ -2,7 +2,8 @@
 
 > 透過 470 行 PyTorch 原始碼，從第一性原理看懂 LLM 推理機制
 
-**[🌐 開啟互動學習指南](./learning_guide.html)** &nbsp;·&nbsp; **[English README](./README_en.md)**
+**[🌐 GitHub Page](https://shaing.github.io/minimind2-guide/)**  
+**[🌐 開啟互動學習指南](./index.html)** &nbsp;·&nbsp; **[English README](./README_en.md)**  
 
 ---
 
@@ -46,17 +47,17 @@
 
 ### 本地開啟
 
-直接用瀏覽器開啟 `learning_guide.html`，無需任何伺服器或安裝。
+直接用瀏覽器開啟 `index.html`，無需任何伺服器或安裝。
 
 ```bash
 # macOS
-open learning_guide.html
+open index.html
 
 # Linux
-xdg-open learning_guide.html
+xdg-open index.html
 
 # Windows
-start learning_guide.html
+start index.html
 ```
 
 ### GitHub Pages
@@ -67,7 +68,7 @@ start learning_guide.html
 4. 儲存後，學習指南公開網址為：
 
 ```text
-https://{你的 GitHub 帳號}.github.io/minimind2-guide/learning_guide.html
+https://{你的 GitHub 帳號}.github.io/minimind2-guide/index.html
 ```
 
 ---
@@ -91,6 +92,6 @@ https://{你的 GitHub 帳號}.github.io/minimind2-guide/learning_guide.html
 minimind2-guide/
 ├── README.md               # 本文件
 ├── README_en.md            # English README
-├── learning_guide.html     # 互動式學習指南（繁中）
+├── index.html     # 互動式學習指南（繁中）
 └── learning_guide_en.html  # 互動式學習指南（英文）— 全自帶 CSS/JS，無外部依賴
 ```

@@ -68,7 +68,7 @@ start learning_guide_en.html
 https://{your-github-username}.github.io/minimind2-guide/learning_guide_en.html
 ```
 
-The Traditional Chinese version is at `learning_guide.html`. A language switcher in the top-right of each page jumps between them.
+The Traditional Chinese version is at `index.html`. A language switcher in the top-right of each page jumps between them.
 
 ---
 
@@ -91,6 +91,6 @@ The Traditional Chinese version is at `learning_guide.html`. A language switcher
 minimind2-guide/
 ├── README.md               # Traditional Chinese README
 ├── README_en.md            # this file
-├── learning_guide.html     # interactive guide (Traditional Chinese)
+├── index.html     # interactive guide (Traditional Chinese)
 └── learning_guide_en.html  # interactive guide (English) — fully self-contained, no external assets
 ```
