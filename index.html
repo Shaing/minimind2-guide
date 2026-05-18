@@ -675,7 +675,9 @@
     <a href="#q6">Context</a>
     <a href="#q7">Mask</a>
     <a href="#q8">Streaming</a>
-    <a href="learning_guide_en.html" style="margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--border);">English</a>
+    <a href="#q9">Bandwidth</a>
+    <a href="architecture.html" style="margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--border);">架構圖</a>
+    <a href="learning_guide_en.html" style="padding-left: 12px; border-left: 1px solid var(--border);">English</a>
   </nav>
 </header>
 
@@ -691,6 +693,7 @@
     <a href="#q6">Q6 · Context Window <span class="zh">上下文視窗</span></a>
     <a href="#q7">Q7 · Attention Mask <span class="zh">注意力掩碼</span></a>
     <a href="#q8">Q8 · Streaming <span class="zh">串流</span></a>
+    <a href="#q9">Q9 · Memory Bandwidth <span class="zh">記憶體頻寬</span></a>
     <a href="#appendix">📜 完整時序圖</a>
 
     <h4>互動小工具</h4>
@@ -699,6 +702,10 @@
     <a href="#demo-gqa">⚙️ GQA vs MHA</a>
     <a href="#demo-ctx">📐 Context 成本縮放</a>
     <a href="#demo-mask">🎭 注意力掩碼網格</a>
+    <a href="#demo-roofline">📈 Roofline 計算器</a>
+
+    <h4>視覺參考</h4>
+    <a href="architecture.html" target="_blank">🗺 MiniMind 架構圖</a>
 
     <h4>專案速覽</h4>
     <a href="https://github.com/jingyaogong/minimind/blob/master/model/model_minimind.py">📄 model_minimind.py</a>
@@ -716,7 +723,7 @@
         <span class="zh-sub">Prefill · Decode · KV Cache · Multi-turn Chat · Context Window — 一份程式碼即真相的學習指南</span>
       </h1>
       <p class="hero-desc">
-        本指南把你的 5 個核心問題拆成 8 個 Q&A，每個概念都直接<strong>對應到 MiniMind2 程式碼的具體行號</strong>。
+        本指南把你的 5 個核心問題拆成 9 個 Q&A（含一章從半導體物理推導 LLM 記憶體頻寬瓶頸），每個概念都直接<strong>對應到 MiniMind2 程式碼的具體行號</strong>。
         所有圖示、計算器、動畫都是即時運算的真實邏輯 — 不是裝飾，是讓你「親手看見」張量形狀如何隨著生成過程演化。
         關鍵英文術語旁標示<span class="term">中文釋義</span>方便理解。
       </p>
@@ -1410,6 +1417,234 @@ You are a helpful assistant&lt;|im_end|&gt;
     </section>
 
 
+    <!-- ========== Q9 MEMORY BANDWIDTH ========== -->
+    <section id="q9">
+      <div class="section-head">
+        <span class="section-tag">Question 9</span>
+        <h2>記憶體頻寬瓶頸 <span class="zh">Memory Bandwidth & Roofline</span></h2>
+      </div>
+
+      <h3>🧭 第一性原理</h3>
+      <p>Q2 結尾說 decode 是 <em>memory-bound</em>、Q3 算了 KV cache 大小、Q8 區分了 TTFT 與 TPOT — 這三件事其實是<strong>同一件事</strong>的不同切面。本章把它們縫進 <strong>馮紐曼瓶頸 (von Neumann bottleneck)</strong> 與 <strong>Roofline 模型</strong>的框架，回答一個尖銳問題：</p>
+
+      <div class="callout">
+        <div class="callout-title">🎯 核心觀察</div>
+        H100 有 989 TFLOPS 算力與 3.35 TB/s 的 HBM3 頻寬，跑 Llama-7B decode 卻只能拿到 ~150 tokens/s，<strong>算力閒置超過 99%</strong> — 為什麼？
+      </div>
+
+      <h3>🧱 馮紐曼瓶頸 · 儲存與計算在物理上是分離的</h3>
+      <p>任何數位電路都要回答兩個問題：(1) 0 與 1 存在哪裡？(2) 算術運算在哪裡執行？這兩個任務需要<strong>不同的電路設計</strong>：</p>
+
+      <table>
+        <thead>
+          <tr><th>功能</th><th>主要結構</th><th>特性</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>儲存（DRAM cell）</td><td>1 電容 + 1 電晶體</td><td>高密度、慢、需 refresh</td></tr>
+          <tr><td>儲存（SRAM cell）</td><td>6 電晶體</td><td>低密度（面積大 ~100×）、快、靜態保持</td></tr>
+          <tr><td>計算（MAC unit）</td><td>加法器 + 乘法器 + 暫存器</td><td>邏輯密集、需靠近暫存器</td></tr>
+        </tbody>
+      </table>
+
+      <p>DRAM 製程與邏輯製程<strong>互不相容</strong>：DRAM 為了壓低成本使用較大電容與特殊金屬層；邏輯製程則追求最小通道長度。因此 HBM 必須做成獨立晶片堆疊在 GPU die 旁邊，透過 interposer 連接：</p>
+
+<pre><span class="filename">GPU package 物理示意</span>┌──────────────────────────────┐
+│  GPU Package                 │
+│                              │
+│  ┌──────────┐   ┌─────────┐  │
+│  │ GPU Die  │←→ │  HBM    │  │  ← 兩個獨立晶片
+│  │ (logic + │   │ (DRAM   │  │     必須跨界搬資料
+│  │  SRAM)   │   │  only)  │  │
+│  └──────────┘   └─────────┘  │
+└──────────────────────────────┘</pre>
+
+      <p>這就是<strong>馮紐曼瓶頸</strong>的物理根源 — 資料必須在兩個物理分離的電路間移動才能完成運算。所有當代加速器（GPU、TPU、NPU）都無法繞過這個事實，差別只在於「移動成本如何分攤」。</p>
+
+      <h3>🪜 記憶體階層的取捨</h3>
+      <p>SRAM 每 bit 面積是 DRAM 的 ~100 倍，將整個模型放進片上 SRAM 在經濟上不可行。以 H100 為例：</p>
+
+      <table>
+        <thead>
+          <tr><th>層級</th><th>容量</th><th>頻寬</th><th>距離 MAC</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Register File</td><td>256 KB / SM</td><td>~固定週期存取</td><td>0</td></tr>
+          <tr><td>L1 / Shared SRAM</td><td>256 KB / SM</td><td>~33 TB/s</td><td>同 SM</td></tr>
+          <tr><td>L2 SRAM</td><td>~50 MB</td><td>~5 TB/s</td><td>同 die</td></tr>
+          <tr><td><strong>HBM3</strong></td><td><strong>80 GB</strong></td><td><strong>3.35 TB/s</strong></td><td><strong>off-chip</strong></td></tr>
+        </tbody>
+      </table>
+
+      <p>容量每往下一層增加 ~10³ 倍，頻寬就掉 ~10× — 這是經濟與物理共同決定的取捨，<strong>不是設計缺陷</strong>。</p>
+
+      <h3>📐 Roofline 模型 · 量化瓶頸位置</h3>
+      <p>定義 <strong>算術強度 (Arithmetic Intensity, AI)</strong>：</p>
+<pre>I = FLOPs 執行數 / Bytes 從 DRAM 讀取數</pre>
+      <p>對某加速器，定義 <strong>轉折算術強度 (ridge point)</strong>：</p>
+<pre>I* = Peak FLOPs / Peak Bandwidth</pre>
+      <p>H100 的 <code class="inline-code">I* = 989 × 10¹² / 3.35 × 10¹² ≈ 295 FLOPs/byte</code>。</p>
+      <p><strong>Roofline 給出實際 throughput 的上界：</strong></p>
+<pre>Throughput = min(Peak FLOPs, I × Bandwidth)</pre>
+      <ul>
+        <li>當 <code class="inline-code">I &lt; I*</code>：<strong>memory-bound</strong><span class="term">頻寬受限</span>，throughput 受頻寬限制</li>
+        <li>當 <code class="inline-code">I &gt; I*</code>：<strong>compute-bound</strong><span class="term">算力受限</span>，throughput 受 FLOPs 限制</li>
+      </ul>
+
+      <h3>⚖️ Prefill vs Decode 的算術強度</h3>
+      <p>對某層線性 <code class="inline-code">Y = XW</code>，<code class="inline-code">W ∈ ℝ^(d×d)</code>：</p>
+      <ul>
+        <li><strong>Prefill</strong>：輸入 N 個 token，讀一次 W (d²·b bytes) 做 2Nd² FLOPs → <code class="inline-code">I ≈ 2N/b</code></li>
+        <li><strong>Decode</strong>：輸入 1 個 token，讀一次 W 只做 2d² FLOPs → <code class="inline-code">I ≈ 2/b</code></li>
+      </ul>
+      <p>代入 FP16 (b=2)：</p>
+
+      <table>
+        <thead>
+          <tr><th>階段</th><th>算術強度</th><th>對比 I* ≈ 295</th><th>結論</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Prefill (N=2000)</td><td>~2000</td><td><code class="inline-code">≫ I*</code></td><td><span style="color: var(--green);">compute-bound</span></td></tr>
+          <tr><td>Decode (N=1)</td><td>~1</td><td><code class="inline-code">≪ I*</code></td><td><span style="color: var(--yellow);">memory-bound</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <div class="callout-title">🤔 為什麼相差三個數量級？</div>
+        Prefill 與 decode 是<strong>同一個 GEMM</strong> — 差別只在 input 的 batch 維度，從 N=2000 降到 N=1，所以 I 也跟著降三個數量級。權重的<strong>共用潛力是模型結構天生賦予的</strong>（每個 token 用同一個 W），batching 只是把這個共用「兌現」出來。當 N=1 時沒有任何 reuse，每次 W 載入只服務一個 token，搬運成本完全暴露在頻寬上。
+      </div>
+
+      <h3>🧮 Llama-7B Decode 的端到端頻寬計算</h3>
+      <p>H100 跑 Llama-7B（FP16，4K context）decode 的搬運帳本：</p>
+
+<pre><span class="filename">每 token 搬運量</span>權重         : 14 GB
+KV cache 讀取: 2 GB  (隨 context 增長)
+Activation   : ~MB 級 (可忽略)
+─────────────────────────
+總計          : ~16 GB / token
+
+理論上限 = HBM 頻寬 / 每 token 搬運量
+        = 3350 GB/s / 16 GB
+        ≈ 209 tokens/s</pre>
+
+      <p>實測 100~150 tokens/s（受 kernel launch overhead、cache miss 影響），<strong>確認 decode 已逼近頻寬上限</strong> — 989 TFLOPS 中真正用到的不到 1%。</p>
+
+      <!-- INTERACTIVE ROOFLINE -->
+      <div id="demo-roofline" class="card interactive">
+        <div class="card-title">📈 互動實驗 · Roofline 計算器</div>
+        <p style="margin-bottom: 12px;">調整硬體與工作負載，看當前運作點落在 Roofline 的哪一段（memory-bound vs compute-bound）。</p>
+
+        <div class="calc">
+          <div class="calc-controls">
+            <div class="calc-row">
+              <label>硬體預設</label>
+              <select id="rf-hw" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="h100" selected>H100 · HBM3 · 989 TFLOPS / 3.35 TB/s</option>
+                <option value="a100">A100 · HBM2e · 312 TFLOPS / 2.0 TB/s</option>
+                <option value="rtx4090">RTX 4090 · GDDR6X · 330 TFLOPS / 1.0 TB/s</option>
+                <option value="edge">邊緣 NPU · LPDDR5 · 50 TOPS / 68 GB/s</option>
+              </select>
+            </div>
+            <div class="calc-row">
+              <label>階段</label>
+              <select id="rf-mode" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="prefill">Prefill</option>
+                <option value="decode" selected>Decode</option>
+              </select>
+            </div>
+            <div class="calc-row">
+              <label>Batch size (B) <span class="val" id="v-rfb">1</span></label>
+              <input type="range" id="r-rfb" min="1" max="512" value="1">
+            </div>
+            <div class="calc-row">
+              <label>Prefill seq_len (N，僅 prefill 用) <span class="val" id="v-rfn">2000</span></label>
+              <input type="range" id="r-rfn" min="1" max="8192" value="2000" step="1">
+            </div>
+            <div class="calc-row">
+              <label>精度 b</label>
+              <select id="r-rfdt" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="2" selected>FP16 / BF16 (2 bytes)</option>
+                <option value="1">INT8 (1 byte)</option>
+                <option value="0.5">INT4 (0.5 byte)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="calc-result">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim);">算術強度 I (FLOPs/byte)</div>
+            <div class="calc-big" id="rf-i">—</div>
+            <div id="rf-regime" style="font-size: 13px; font-weight: 700; min-height: 18px;"></div>
+            <div class="calc-formula" id="rf-bd"></div>
+            <div style="width: 100%; margin-top: 18px;">
+              <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px; display: flex; justify-content: space-between;">
+                <span>位置：I vs ridge point I*</span>
+                <span id="rf-ratio" class="mono"></span>
+              </div>
+              <div style="position: relative; height: 14px; background: var(--surface-2); border-radius: 7px; overflow: hidden;">
+                <div id="rf-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--red), var(--yellow), var(--green)); transition: width 0.5s ease;"></div>
+                <div style="position: absolute; top: -2px; left: 50%; width: 2px; height: 18px; background: var(--text-bright); opacity: 0.6;"></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px;">
+                <span>0.1× I*</span><span style="color: var(--text-bright);">I*（轉折點）</span><span>10× I*</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3>🔒 為什麼 Decode 無法自我 Batch</h3>
+      <p>權重共用潛力雖然存在，但被<strong>自迴歸依賴</strong>鎖死：</p>
+<pre>t_{N+1} = sample(model(t_1, ..., t_N))
+t_{N+2} = sample(model(t_1, ..., t_N, t_{N+1}))  ← 需要 t_{N+1} 的具體值</pre>
+      <p><code class="inline-code">t_{N+2}</code> 的輸入需要 <code class="inline-code">t_{N+1}</code> 的具體值，而後者必須先走完整個模型才能採樣出來。這條依賴鏈在硬體層鎖住了「將未來 K 個 token 一次餵入 W」的可能性。即使只看單一 token 的計算路徑 <code class="inline-code">W_0 → W_1 → ... → W_31</code>，從 W_0 用完到下一個 token 再次需要 W_0，期間 SRAM 必須依序載入 14 GB 的權重 — W_0 不可能被保留。</p>
+
+      <div class="callout">
+        <div class="callout-title">📌 困境的精確表述</div>
+        <p style="margin: 0;"><strong>跨 token 的權重共用潛力確實存在，但被自迴歸的序列依賴與有限的 SRAM 容量共同鎖住，無法在硬體層自然兌現。</strong></p>
+      </div>
+
+      <h3>🚀 主流加速策略 · 從 Roofline 推導</h3>
+      <p>所有有效策略都圍繞兩個變數：<strong>拉高 I</strong>（讓硬體進入 compute-bound）或 <strong>降低 |W|+|KV|</strong>（縮小頻寬負擔）：</p>
+
+      <table>
+        <thead>
+          <tr><th>技術</th><th>攻擊目標</th><th>機制</th><th>對應章節</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Continuous batching</td><td>↑ I</td><td>多 user 共用一次權重載入</td><td>—</td></tr>
+          <tr><td>Speculative decoding</td><td>↑ I</td><td>draft model 猜 K 個 token，大模型一次驗證</td><td>—</td></tr>
+          <tr><td>Multi-token prediction (Medusa / MTP)</td><td>↑ I</td><td>模型內建多輸出 head，單次 forward 產出多 token</td><td>—</td></tr>
+          <tr><td>量化 (INT8 / INT4)</td><td>↓ 搬運量</td><td>縮小 <code class="inline-code">|W|</code> 與 KV</td><td>—</td></tr>
+          <tr><td>GQA / MQA</td><td>↓ 搬運量</td><td>縮減 KV head 數</td><td><a class="inline" href="#q4">Q4</a></td></tr>
+          <tr><td>FlashAttention</td><td>↓ 搬運量</td><td>tile 化 attention，避免大 activation 寫回</td><td>—</td></tr>
+          <tr><td>PagedAttention</td><td>提升頻寬利用率</td><td>消除 KV cache 碎片</td><td>—</td></tr>
+          <tr><td>Tensor parallelism</td><td>↑ 總頻寬</td><td>多 GPU 並聯 HBM</td><td>—</td></tr>
+        </tbody>
+      </table>
+
+      <h3>🔮 範式級突破方向</h3>
+      <p>真正的突破必須挑戰「儲存與計算分離」這個馮紐曼前提：</p>
+
+      <table>
+        <thead>
+          <tr><th>方向</th><th>範例</th><th>原理</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Processing-in-Memory (PIM)</td><td>Samsung HBM-PIM、SK Hynix AiM</td><td>在 DRAM bank 內塞運算單元，部分運算就地完成</td></tr>
+          <tr><td>Wafer-scale integration</td><td>Cerebras WSE-3</td><td>整片晶圓當一顆晶片，40 GB 片上 SRAM，根本不用 HBM</td></tr>
+          <tr><td>SRAM-first 設計</td><td>Groq LPU</td><td>全 SRAM 架構，犧牲容量換頻寬</td></tr>
+          <tr><td>3D 整合</td><td>AMD MI300X (HBM3e + chiplet)</td><td>縮短儲存到計算的物理距離</td></tr>
+        </tbody>
+      </table>
+
+      <p>若硬體能將整個模型常駐 SRAM（如 Cerebras WSE-3、Groq LPU），<code class="inline-code">W</code> 在 SRAM 中可<strong>跨 token 持續存在</strong>，自迴歸依賴造成的搬運懲罰會從硬體層直接消失 — 這也是純 SRAM 架構能在 70B 模型上達到 500+ tokens/s decode 速度的原因。</p>
+
+      <div class="callout tip">
+        <div class="callout-title">📑 想看完整推導？</div>
+        本章是 <a class="inline" href="llm-memory-bandwidth-report.md">llm-memory-bandwidth-report.md</a> 的視覺化精華。完整 report 從半導體製程的物理限制出發，逐層推導到端到端頻寬計算，並涵蓋邊緣 NPU 的工程取捨對比與快速估算公式。
+      </div>
+    </section>
+
+
     <!-- ========== APPENDIX ========== -->
     <section id="appendix">
       <div class="section-head">
@@ -1417,7 +1652,7 @@ You are a helpful assistant&lt;|im_end|&gt;
         <h2>一張圖串起所有概念 <span class="zh">Putting It All Together</span></h2>
       </div>
 
-      <p>所有 8 個概念其實是<strong>同一個 forward 函數的 8 種視角</strong>。下圖把它們縫在一起：</p>
+      <p>所有 9 個概念其實是<strong>同一個 forward 函數的 9 種視角</strong>（Q1–Q8 在程式碼層，Q9 在硬體層）。下圖把它們縫在一起：</p>
 
       <div class="final-diagram">                                ┌────────────────────────────────────────┐
                                 │            ONE forward() call          │
@@ -1756,6 +1991,77 @@ document.querySelectorAll('.turn').forEach((el, i) => {
   el.style.cursor = 'pointer';
   el.onclick = () => playTurn(i);
 });
+
+
+// ============================================================
+// Roofline Calculator (Q9)
+// ============================================================
+const rfHwPresets = {
+  h100:    { name: 'H100',     flops: 989e12, bw: 3.35e12, unit: 'TFLOPS' },
+  a100:    { name: 'A100',     flops: 312e12, bw: 2.00e12, unit: 'TFLOPS' },
+  rtx4090: { name: 'RTX 4090', flops: 330e12, bw: 1.00e12, unit: 'TFLOPS' },
+  edge:    { name: '邊緣 NPU', flops:  50e12, bw: 68e9,    unit: 'TOPS' },
+};
+
+const rfHw    = document.getElementById('rf-hw');
+const rfMode  = document.getElementById('rf-mode');
+const rfB     = document.getElementById('r-rfb');
+const rfN     = document.getElementById('r-rfn');
+const rfDt    = document.getElementById('r-rfdt');
+const rfBVal  = document.getElementById('v-rfb');
+const rfNVal  = document.getElementById('v-rfn');
+const rfI     = document.getElementById('rf-i');
+const rfReg   = document.getElementById('rf-regime');
+const rfBd    = document.getElementById('rf-bd');
+const rfBar   = document.getElementById('rf-bar');
+const rfRatio = document.getElementById('rf-ratio');
+
+function fmtThroughput(tflops) {
+  if (tflops >= 1e12) return (tflops/1e12).toFixed(1) + ' TFLOPS';
+  if (tflops >= 1e9)  return (tflops/1e9).toFixed(1) + ' GFLOPS';
+  return tflops.toExponential(2) + ' FLOPS';
+}
+
+function updateRoofline() {
+  const hw     = rfHwPresets[rfHw.value];
+  const mode   = rfMode.value;
+  const B      = parseInt(rfB.value);
+  const N      = parseInt(rfN.value);
+  const b      = parseFloat(rfDt.value);
+
+  rfBVal.textContent = B;
+  rfNVal.textContent = N.toLocaleString();
+
+  const ridge = hw.flops / hw.bw;
+  // Effective tokens-per-weight-load
+  // Prefill: B*N tokens share one W load
+  // Decode:  B tokens (one per user) share one W load
+  const tokensPerLoad = (mode === 'prefill') ? B * N : B;
+  const I = (2 * tokensPerLoad) / b;
+
+  const cap = Math.min(hw.flops, I * hw.bw);
+  const memoryBound = I < ridge;
+
+  rfI.textContent = I < 1 ? I.toFixed(2) : Math.round(I).toLocaleString();
+  rfReg.innerHTML = memoryBound
+    ? '<span style="color: var(--yellow);">⚠ memory-bound — 頻寬鎖死</span>'
+    : '<span style="color: var(--green);">✓ compute-bound — 算力鎖死</span>';
+  rfBd.innerHTML =
+    `I* = ${Math.round(ridge).toLocaleString()} FLOPs/byte<br>` +
+    `Peak: ${fmtThroughput(hw.flops)} · BW: ${(hw.bw/1e12).toFixed(2)} TB/s<br>` +
+    `Throughput 上界 ≈ ${fmtThroughput(cap)}`;
+
+  // Position on log-scale bar: center = ridge, ±2 decades
+  const ratio = I / ridge;
+  rfRatio.textContent = ratio >= 1 ? `${ratio.toFixed(2)}× I*` : `${(ratio).toFixed(3)}× I*`;
+  const logR = Math.log10(Math.max(ratio, 1e-6));
+  const clamped = Math.max(-2, Math.min(2, logR));
+  const pct = ((clamped + 2) / 4) * 100;
+  rfBar.style.width = pct + '%';
+}
+
+[rfHw, rfMode, rfB, rfN, rfDt].forEach(el => el.addEventListener('input', updateRoofline));
+updateRoofline();
 </script>
 
 </body>

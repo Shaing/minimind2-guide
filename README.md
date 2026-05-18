@@ -20,7 +20,7 @@
 - KV Cache 就是 3 行 `torch.cat`，Prefill/Decode 的切換只是一個 `if past_key_values is None`
 - 所有概念都是**顯式可見**的，讓學習者直接對應程式碼行號理解原理
 
-這份學習指南正是以此為基礎，把 LLM 推理最容易混淆的概念拆解成 8 個 Q&A，並附上即時互動的動畫與計算器。
+這份學習指南正是以此為基礎，把 LLM 推理最容易混淆的概念拆解成 9 個 Q&A，並附上即時互動的動畫與計算器。第 9 章 (Q9) 從半導體物理一路推導到 LLM 記憶體頻寬瓶頸，搭配 [llm-memory-bandwidth-report.md](./llm-memory-bandwidth-report.md) 作為深度補充。
 
 ---
 
@@ -37,6 +37,7 @@
 | Q6 | **Context Window 為何是 4096？** 三道物理閘門 + YaRN 延伸 | 長度 vs FLOPs/記憶體滑桿 |
 | Q7 | **Causal Mask + Padding Mask**：兩種掩碼的組合方式 | 注意力掩碼網格 |
 | Q8 | **串流輸出原理**：TTFT vs TPOT，TextStreamer 如何運作 | — |
+| Q9 | **記憶體頻寬瓶頸**：從馮紐曼瓶頸 + Roofline 模型解釋為何 decode 是 memory-bound | Roofline 計算器 |
 | Appendix | 一張圖串起所有概念 + 進階挑戰題 | — |
 
 每個章節都直接標注對應的 [model_minimind.py](https://github.com/jingyaogong/minimind/blob/master/model/model_minimind.py) 行號，方便對照閱讀原始碼。
@@ -90,8 +91,9 @@ https://{你的 GitHub 帳號}.github.io/minimind2-guide/index.html
 
 ```text
 minimind2-guide/
-├── README.md               # 本文件
-├── README_en.md            # English README
-├── index.html     # 互動式學習指南（繁中）
-└── learning_guide_en.html  # 互動式學習指南（英文）— 全自帶 CSS/JS，無外部依賴
+├── README.md                          # 本文件
+├── README_en.md                       # English README
+├── index.html                         # 互動式學習指南（繁中）
+├── learning_guide_en.html             # 互動式學習指南（英文）— 全自帶 CSS/JS，無外部依賴
+└── llm-memory-bandwidth-report.md     # Q9 深度補充：從半導體物理到 Roofline 模型
 ```

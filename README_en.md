@@ -17,7 +17,7 @@ Most LLM inference behavior is hidden under several layers of Hugging Face Trans
 - The KV cache is three `torch.cat` calls. The prefill-vs-decode switch is one `if past_key_values is None`. Multi-turn chat is a list of dicts passed to a Jinja template.
 - Every "magical" concept is **plainly visible** — you can follow the math by line number
 
-This guide treats those 470 lines as the source of truth. Eight Q&As walk you through the most commonly confused mechanics, each backed by working code and live interactive widgets in the browser.
+This guide treats those 470 lines as the source of truth. Nine Q&As walk you through the most commonly confused mechanics, each backed by working code and live interactive widgets in the browser. The final chapter (Q9) zooms out from code to silicon and derives the memory-bandwidth bottleneck from first principles — paired with [llm-memory-bandwidth-report.md](./llm-memory-bandwidth-report.md) (Traditional Chinese) for the full derivation.
 
 ---
 
@@ -34,7 +34,8 @@ This guide treats those 470 lines as the source of truth. Eight Q&As walk you th
 | Q6 | **Why is the context window 4096?** Three independent gates + YaRN extension | Length vs FLOPs / memory slider |
 | Q7 | **Causal Mask + Padding Mask** — two masks, composable | Attention mask grid |
 | Q8 | **Streaming Output** — TTFT vs TPOT, TextStreamer internals | — |
-| Appendix | One diagram tying all 8 concepts together + next-step challenges | — |
+| Q9 | **Memory Bandwidth Bottleneck** — why decode is memory-bound, from the von Neumann bottleneck and the Roofline model | Roofline calculator |
+| Appendix | One diagram tying all 9 concepts together + next-step challenges | — |
 
 Every section anchors back to specific line numbers in [model_minimind.py](https://github.com/jingyaogong/minimind/blob/master/model/model_minimind.py) so you can read the prose and the code side by side.
 
@@ -89,8 +90,9 @@ The Traditional Chinese version is at `index.html`. A language switcher in the t
 
 ```text
 minimind2-guide/
-├── README.md               # Traditional Chinese README
-├── README_en.md            # this file
-├── index.html     # interactive guide (Traditional Chinese)
-└── learning_guide_en.html  # interactive guide (English) — fully self-contained, no external assets
+├── README.md                          # Traditional Chinese README
+├── README_en.md                       # this file
+├── index.html                         # interactive guide (Traditional Chinese)
+├── learning_guide_en.html             # interactive guide (English) — fully self-contained
+└── llm-memory-bandwidth-report.md     # Q9 deep dive: semiconductor physics → Roofline (zh-TW)
 ```

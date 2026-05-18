@@ -675,6 +675,7 @@
     <a href="#q6">Context</a>
     <a href="#q7">Mask</a>
     <a href="#q8">Streaming</a>
+    <a href="#q9">Bandwidth</a>
     <a href="index.html" style="margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--border);">繁體中文</a>
   </nav>
 </header>
@@ -691,6 +692,7 @@
     <a href="#q6">Q6 · Context Window</a>
     <a href="#q7">Q7 · Attention Mask</a>
     <a href="#q8">Q8 · Streaming</a>
+    <a href="#q9">Q9 · Memory Bandwidth</a>
     <a href="#appendix">📜 Full Sequence Diagram</a>
 
     <h4>Interactive Widgets</h4>
@@ -699,6 +701,7 @@
     <a href="#demo-gqa">⚙️ GQA vs MHA</a>
     <a href="#demo-ctx">📐 Context Cost Scaling</a>
     <a href="#demo-mask">🎭 Attention Mask Grid</a>
+    <a href="#demo-roofline">📈 Roofline Calculator</a>
 
     <h4>Quick Reference</h4>
     <a href="https://github.com/jingyaogong/minimind/blob/master/model/model_minimind.py">📄 model_minimind.py</a>
@@ -716,7 +719,7 @@
         <span class="zh-sub">Prefill · Decode · KV Cache · Multi-turn Chat · Context Window — a learning guide where the code is the ground truth</span>
       </h1>
       <p class="hero-desc">
-        This guide breaks the five core questions you'll face into eight Q&amp;As, each one anchored to <strong>specific line numbers in the MiniMind2 source</strong>.
+        This guide breaks the five core questions you'll face into nine Q&amp;As (the last one derives the LLM memory-bandwidth bottleneck from semiconductor physics), each anchored to <strong>specific line numbers in the MiniMind2 source</strong>.
         Every diagram, calculator, and animation runs real logic in your browser — they're not decoration, they're how you <em>see</em> tensor shapes evolve as generation unfolds.
       </p>
 
@@ -1409,6 +1412,234 @@ Can you help me write code?&lt;|im_end|&gt;
     </section>
 
 
+    <!-- ========== Q9 MEMORY BANDWIDTH ========== -->
+    <section id="q9">
+      <div class="section-head">
+        <span class="section-tag">Question 9</span>
+        <h2>Memory Bandwidth & the Roofline Model</h2>
+      </div>
+
+      <h3>🧭 First Principles</h3>
+      <p>Q2 ended by calling decode <em>memory-bound</em>, Q3 quantified the KV cache, Q8 split user-perceived latency into TTFT vs TPOT. These are <strong>three views of the same physical fact</strong>. This chapter stitches them into the <strong>von Neumann bottleneck</strong> and the <strong>Roofline model</strong>, and answers one sharp question:</p>
+
+      <div class="callout">
+        <div class="callout-title">🎯 Core observation</div>
+        An H100 has 989 TFLOPS of compute and 3.35 TB/s of HBM3 bandwidth, yet Llama-7B decode tops out at ~150 tokens/s. <strong>Over 99% of the compute is idle</strong> — why?
+      </div>
+
+      <h3>🧱 Von Neumann bottleneck — storage and compute are physically separate</h3>
+      <p>Any digital circuit must answer two questions: (1) where do the 0s and 1s live? (2) where does the arithmetic happen? These two tasks need <strong>different circuit designs</strong>:</p>
+
+      <table>
+        <thead>
+          <tr><th>Function</th><th>Primary structure</th><th>Properties</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Storage (DRAM cell)</td><td>1 capacitor + 1 transistor</td><td>High density, slow, needs refresh</td></tr>
+          <tr><td>Storage (SRAM cell)</td><td>6 transistors</td><td>Low density (~100× larger area), fast, static</td></tr>
+          <tr><td>Compute (MAC unit)</td><td>Adder + multiplier + registers</td><td>Logic-dense, must sit next to registers</td></tr>
+        </tbody>
+      </table>
+
+      <p>DRAM and logic processes are <strong>mutually incompatible</strong>: DRAM uses larger capacitors and special metal layers for cost; logic chases minimum channel length for speed. So HBM <em>must</em> sit as a separate die stacked next to the GPU die, connected via interposer:</p>
+
+<pre><span class="filename">GPU package layout</span>┌──────────────────────────────┐
+│  GPU Package                 │
+│                              │
+│  ┌──────────┐   ┌─────────┐  │
+│  │ GPU Die  │←→ │  HBM    │  │  ← two separate dies
+│  │ (logic + │   │ (DRAM   │  │     data must cross
+│  │  SRAM)   │   │  only)  │  │     a physical gap
+│  └──────────┘   └─────────┘  │
+└──────────────────────────────┘</pre>
+
+      <p>This is the physical root of the <strong>von Neumann bottleneck</strong> — data has to move between two physically separated circuits before any computation can finish. GPUs, TPUs, NPUs — none of today's accelerators bypass this fact. They only differ in <em>how the movement cost is amortized</em>.</p>
+
+      <h3>🪜 The memory hierarchy is a forced trade-off</h3>
+      <p>SRAM costs roughly 100× the area per bit vs DRAM, so putting the whole model on-die is economically out of reach. On an H100:</p>
+
+      <table>
+        <thead>
+          <tr><th>Tier</th><th>Capacity</th><th>Bandwidth</th><th>Distance to MAC</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Register File</td><td>256 KB / SM</td><td>~1 cycle</td><td>0</td></tr>
+          <tr><td>L1 / Shared SRAM</td><td>256 KB / SM</td><td>~33 TB/s</td><td>Same SM</td></tr>
+          <tr><td>L2 SRAM</td><td>~50 MB</td><td>~5 TB/s</td><td>Same die</td></tr>
+          <tr><td><strong>HBM3</strong></td><td><strong>80 GB</strong></td><td><strong>3.35 TB/s</strong></td><td><strong>Off-chip</strong></td></tr>
+        </tbody>
+      </table>
+
+      <p>Each tier down gives ~1000× capacity and pays ~10× in bandwidth. This is what economics and physics jointly enforce — <strong>not a design flaw</strong>.</p>
+
+      <h3>📐 Roofline model — quantifying where the bottleneck lives</h3>
+      <p>Define <strong>arithmetic intensity</strong>:</p>
+<pre>I = FLOPs executed / Bytes read from DRAM</pre>
+      <p>For a given accelerator, the <strong>ridge point</strong> is:</p>
+<pre>I* = Peak FLOPs / Peak Bandwidth</pre>
+      <p>For H100: <code class="inline-code">I* = 989 × 10¹² / 3.35 × 10¹² ≈ 295 FLOPs/byte</code>.</p>
+      <p><strong>Roofline gives the achievable throughput ceiling:</strong></p>
+<pre>Throughput = min(Peak FLOPs, I × Bandwidth)</pre>
+      <ul>
+        <li>If <code class="inline-code">I &lt; I*</code>: <strong>memory-bound</strong> — throughput is capped by bandwidth</li>
+        <li>If <code class="inline-code">I &gt; I*</code>: <strong>compute-bound</strong> — throughput is capped by FLOPs</li>
+      </ul>
+
+      <h3>⚖️ Arithmetic intensity of prefill vs decode</h3>
+      <p>For a linear layer <code class="inline-code">Y = XW</code>, <code class="inline-code">W ∈ ℝ^(d×d)</code>:</p>
+      <ul>
+        <li><strong>Prefill</strong>: feed N tokens, read W once (d²·b bytes) for 2Nd² FLOPs → <code class="inline-code">I ≈ 2N/b</code></li>
+        <li><strong>Decode</strong>: feed 1 token, still read W once but do only 2d² FLOPs → <code class="inline-code">I ≈ 2/b</code></li>
+      </ul>
+      <p>Plug in FP16 (b=2):</p>
+
+      <table>
+        <thead>
+          <tr><th>Phase</th><th>Arithmetic intensity</th><th>vs I* ≈ 295</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Prefill (N=2000)</td><td>~2000</td><td><code class="inline-code">≫ I*</code></td><td><span style="color: var(--green);">compute-bound</span></td></tr>
+          <tr><td>Decode (N=1)</td><td>~1</td><td><code class="inline-code">≪ I*</code></td><td><span style="color: var(--yellow);">memory-bound</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <div class="callout-title">🤔 Why a 3-order-of-magnitude gap?</div>
+        Prefill and decode are <strong>the same GEMM</strong> — only the batch dimension of the input differs (N=2000 vs N=1), so I drops by three orders of magnitude. The weight-reuse <em>potential</em> is <strong>baked into the model structure</strong> (every token uses the same W), and batching merely <em>cashes it in</em>. At N=1 there is nothing to reuse: every W load services exactly one token, so the movement cost is fully exposed to bandwidth.
+      </div>
+
+      <h3>🧮 End-to-end bandwidth math for Llama-7B decode</h3>
+      <p>H100 running Llama-7B (FP16, 4K context) decode:</p>
+
+<pre><span class="filename">Bytes moved per token</span>Weights      : 14 GB
+KV cache read: 2 GB  (grows with context)
+Activations  : ~MB-scale (negligible)
+─────────────────────────
+Total        : ~16 GB / token
+
+Theoretical ceiling = HBM BW / bytes per token
+                    = 3350 GB/s / 16 GB
+                    ≈ 209 tokens/s</pre>
+
+      <p>Measured: 100~150 tokens/s (kernel launch overhead, cache misses). <strong>Decode is hugging the bandwidth ceiling</strong> — less than 1% of the 989 TFLOPS is actually used.</p>
+
+      <!-- INTERACTIVE ROOFLINE -->
+      <div id="demo-roofline" class="card interactive">
+        <div class="card-title">📈 Interactive · Roofline Calculator</div>
+        <p style="margin-bottom: 12px;">Pick a hardware preset and workload to see where the operating point lands on the Roofline (memory-bound vs compute-bound).</p>
+
+        <div class="calc">
+          <div class="calc-controls">
+            <div class="calc-row">
+              <label>Hardware preset</label>
+              <select id="rf-hw" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="h100" selected>H100 · HBM3 · 989 TFLOPS / 3.35 TB/s</option>
+                <option value="a100">A100 · HBM2e · 312 TFLOPS / 2.0 TB/s</option>
+                <option value="rtx4090">RTX 4090 · GDDR6X · 330 TFLOPS / 1.0 TB/s</option>
+                <option value="edge">Edge NPU · LPDDR5 · 50 TOPS / 68 GB/s</option>
+              </select>
+            </div>
+            <div class="calc-row">
+              <label>Phase</label>
+              <select id="rf-mode" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="prefill">Prefill</option>
+                <option value="decode" selected>Decode</option>
+              </select>
+            </div>
+            <div class="calc-row">
+              <label>Batch size (B) <span class="val" id="v-rfb">1</span></label>
+              <input type="range" id="r-rfb" min="1" max="512" value="1">
+            </div>
+            <div class="calc-row">
+              <label>Prefill seq_len (N — prefill only) <span class="val" id="v-rfn">2000</span></label>
+              <input type="range" id="r-rfn" min="1" max="8192" value="2000" step="1">
+            </div>
+            <div class="calc-row">
+              <label>Precision b</label>
+              <select id="r-rfdt" style="background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px; border-radius: 6px;">
+                <option value="2" selected>FP16 / BF16 (2 bytes)</option>
+                <option value="1">INT8 (1 byte)</option>
+                <option value="0.5">INT4 (0.5 byte)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="calc-result">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim);">Arithmetic intensity I (FLOPs/byte)</div>
+            <div class="calc-big" id="rf-i">—</div>
+            <div id="rf-regime" style="font-size: 13px; font-weight: 700; min-height: 18px;"></div>
+            <div class="calc-formula" id="rf-bd"></div>
+            <div style="width: 100%; margin-top: 18px;">
+              <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 4px; display: flex; justify-content: space-between;">
+                <span>Position: I vs ridge point I*</span>
+                <span id="rf-ratio" class="mono"></span>
+              </div>
+              <div style="position: relative; height: 14px; background: var(--surface-2); border-radius: 7px; overflow: hidden;">
+                <div id="rf-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--red), var(--yellow), var(--green)); transition: width 0.5s ease;"></div>
+                <div style="position: absolute; top: -2px; left: 50%; width: 2px; height: 18px; background: var(--text-bright); opacity: 0.6;"></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px;">
+                <span>0.1× I*</span><span style="color: var(--text-bright);">I* (ridge)</span><span>10× I*</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3>🔒 Why decode can't batch itself</h3>
+      <p>Even though the weight-reuse potential is there, <strong>autoregressive dependency</strong> locks it down:</p>
+<pre>t_{N+1} = sample(model(t_1, ..., t_N))
+t_{N+2} = sample(model(t_1, ..., t_N, t_{N+1}))  ← needs the actual value of t_{N+1}</pre>
+      <p>The input to <code class="inline-code">t_{N+2}</code> requires the sampled value of <code class="inline-code">t_{N+1}</code>, which must run through the entire model first. This dependency chain rules out "feeding the next K tokens through W in one shot" at the hardware level. Even for a single token's path <code class="inline-code">W_0 → W_1 → ... → W_31</code>, by the time the next token needs W_0 again, SRAM has long since evicted it to make room for ~14 GB of subsequent weights.</p>
+
+      <div class="callout">
+        <div class="callout-title">📌 The dilemma in one sentence</div>
+        <p style="margin: 0;"><strong>The cross-token weight-reuse potential exists, but it's locked away by autoregressive sequence dependency and the SRAM capacity limit, so it can't be cashed in at the hardware level.</strong></p>
+      </div>
+
+      <h3>🚀 Mainstream acceleration techniques — all derived from Roofline</h3>
+      <p>Every effective trick attacks one of two variables: <strong>raise I</strong> (push into compute-bound) or <strong>shrink |W|+|KV|</strong> (cut the bandwidth bill):</p>
+
+      <table>
+        <thead>
+          <tr><th>Technique</th><th>Target</th><th>Mechanism</th><th>See also</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Continuous batching</td><td>↑ I</td><td>Multiple concurrent users share one weight load</td><td>—</td></tr>
+          <tr><td>Speculative decoding</td><td>↑ I</td><td>Draft model guesses K tokens, big model verifies in one pass</td><td>—</td></tr>
+          <tr><td>Multi-token prediction (Medusa / MTP)</td><td>↑ I</td><td>Model has multiple output heads, predicts several tokens per forward pass</td><td>—</td></tr>
+          <tr><td>Quantization (INT8 / INT4)</td><td>↓ Bytes moved</td><td>Shrink <code class="inline-code">|W|</code> and KV</td><td>—</td></tr>
+          <tr><td>GQA / MQA</td><td>↓ Bytes moved</td><td>Fewer KV heads</td><td><a class="inline" href="#q4">Q4</a></td></tr>
+          <tr><td>FlashAttention</td><td>↓ Bytes moved</td><td>Tile attention to avoid writing large activations to HBM</td><td>—</td></tr>
+          <tr><td>PagedAttention</td><td>Bandwidth utilization</td><td>Eliminate KV cache fragmentation</td><td>—</td></tr>
+          <tr><td>Tensor parallelism</td><td>↑ Aggregate BW</td><td>Multiple GPUs pool their HBM bandwidth</td><td>—</td></tr>
+        </tbody>
+      </table>
+
+      <h3>🔮 Paradigm-level breakthroughs</h3>
+      <p>A real escape has to attack the von Neumann premise itself — <em>storage and compute being physically separate</em>:</p>
+
+      <table>
+        <thead>
+          <tr><th>Direction</th><th>Example</th><th>Principle</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Processing-in-Memory (PIM)</td><td>Samsung HBM-PIM, SK Hynix AiM</td><td>Embed simple compute units inside DRAM banks, do part of the math in-place</td></tr>
+          <tr><td>Wafer-scale integration</td><td>Cerebras WSE-3</td><td>Treat a whole wafer as one chip, 40 GB on-die SRAM, no HBM at all</td></tr>
+          <tr><td>SRAM-first design</td><td>Groq LPU</td><td>All-SRAM architecture — trade capacity for bandwidth</td></tr>
+          <tr><td>3D integration</td><td>AMD MI300X (HBM3e + chiplet)</td><td>Shorten the physical distance between storage and compute</td></tr>
+        </tbody>
+      </table>
+
+      <p>If the hardware can keep the entire model resident in SRAM (Cerebras WSE-3, Groq LPU), <code class="inline-code">W</code> persists across tokens in fast memory — the autoregressive movement penalty <strong>disappears at the hardware layer</strong>. That's why pure-SRAM architectures can hit 500+ tokens/s decode on 70B models. They don't beat the dilemma algorithmically — they remove its hardware premise.</p>
+
+      <div class="callout tip">
+        <div class="callout-title">📑 Want the full derivation?</div>
+        This chapter is the visual digest of <a class="inline" href="llm-memory-bandwidth-report.md">llm-memory-bandwidth-report.md</a> (Traditional Chinese), which works from semiconductor physics through to end-to-end bandwidth accounting and also covers the engineering trade-offs of edge NPUs.
+      </div>
+    </section>
+
+
     <!-- ========== APPENDIX ========== -->
     <section id="appendix">
       <div class="section-head">
@@ -1416,7 +1647,7 @@ Can you help me write code?&lt;|im_end|&gt;
         <h2>Putting It All Together</h2>
       </div>
 
-      <p>All 8 concepts are really <strong>8 viewpoints on the same forward function</strong>. The diagram below stitches them together:</p>
+      <p>All 9 concepts are really <strong>9 viewpoints on the same forward function</strong> (Q1–Q8 at the code level, Q9 at the hardware level). The diagram below stitches them together:</p>
 
       <div class="final-diagram">                                ┌────────────────────────────────────────┐
                                 │            ONE forward() call          │
@@ -1755,6 +1986,75 @@ document.querySelectorAll('.turn').forEach((el, i) => {
   el.style.cursor = 'pointer';
   el.onclick = () => playTurn(i);
 });
+
+
+// ============================================================
+// Roofline Calculator (Q9)
+// ============================================================
+const rfHwPresets = {
+  h100:    { name: 'H100',     flops: 989e12, bw: 3.35e12, unit: 'TFLOPS' },
+  a100:    { name: 'A100',     flops: 312e12, bw: 2.00e12, unit: 'TFLOPS' },
+  rtx4090: { name: 'RTX 4090', flops: 330e12, bw: 1.00e12, unit: 'TFLOPS' },
+  edge:    { name: 'Edge NPU', flops:  50e12, bw: 68e9,    unit: 'TOPS' },
+};
+
+const rfHw    = document.getElementById('rf-hw');
+const rfMode  = document.getElementById('rf-mode');
+const rfB     = document.getElementById('r-rfb');
+const rfN     = document.getElementById('r-rfn');
+const rfDt    = document.getElementById('r-rfdt');
+const rfBVal  = document.getElementById('v-rfb');
+const rfNVal  = document.getElementById('v-rfn');
+const rfI     = document.getElementById('rf-i');
+const rfReg   = document.getElementById('rf-regime');
+const rfBd    = document.getElementById('rf-bd');
+const rfBar   = document.getElementById('rf-bar');
+const rfRatio = document.getElementById('rf-ratio');
+
+function fmtThroughput(tflops) {
+  if (tflops >= 1e12) return (tflops/1e12).toFixed(1) + ' TFLOPS';
+  if (tflops >= 1e9)  return (tflops/1e9).toFixed(1) + ' GFLOPS';
+  return tflops.toExponential(2) + ' FLOPS';
+}
+
+function updateRoofline() {
+  const hw     = rfHwPresets[rfHw.value];
+  const mode   = rfMode.value;
+  const B      = parseInt(rfB.value);
+  const N      = parseInt(rfN.value);
+  const b      = parseFloat(rfDt.value);
+
+  rfBVal.textContent = B;
+  rfNVal.textContent = N.toLocaleString();
+
+  const ridge = hw.flops / hw.bw;
+  // Prefill: B*N tokens share one W load
+  // Decode:  B tokens (one per concurrent user) share one W load
+  const tokensPerLoad = (mode === 'prefill') ? B * N : B;
+  const I = (2 * tokensPerLoad) / b;
+
+  const cap = Math.min(hw.flops, I * hw.bw);
+  const memoryBound = I < ridge;
+
+  rfI.textContent = I < 1 ? I.toFixed(2) : Math.round(I).toLocaleString();
+  rfReg.innerHTML = memoryBound
+    ? '<span style="color: var(--yellow);">⚠ memory-bound — bandwidth-capped</span>'
+    : '<span style="color: var(--green);">✓ compute-bound — FLOPs-capped</span>';
+  rfBd.innerHTML =
+    `I* = ${Math.round(ridge).toLocaleString()} FLOPs/byte<br>` +
+    `Peak: ${fmtThroughput(hw.flops)} · BW: ${(hw.bw/1e12).toFixed(2)} TB/s<br>` +
+    `Throughput ceiling ≈ ${fmtThroughput(cap)}`;
+
+  const ratio = I / ridge;
+  rfRatio.textContent = ratio >= 1 ? `${ratio.toFixed(2)}× I*` : `${(ratio).toFixed(3)}× I*`;
+  const logR = Math.log10(Math.max(ratio, 1e-6));
+  const clamped = Math.max(-2, Math.min(2, logR));
+  const pct = ((clamped + 2) / 4) * 100;
+  rfBar.style.width = pct + '%';
+}
+
+[rfHw, rfMode, rfB, rfN, rfDt].forEach(el => el.addEventListener('input', updateRoofline));
+updateRoofline();
 </script>
 
 </body>

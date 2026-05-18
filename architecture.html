@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>MiniMind Architecture</title>
+<style>
+body { background:#f5f5f5; display:flex; justify-content:center; padding:30px; margin:0; }
+</style>
+</head>
+<body>
+<svg width="920" height="1030" viewBox="0 0 920 1030" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <marker id="arr" markerWidth="8" markerHeight="8" refX="4" refY="6" orient="auto">
+    <path d="M4,0 L0,8 L8,8 z" fill="#444"/>
+  </marker>
+  <marker id="arrGL" markerWidth="8" markerHeight="8" refX="0" refY="4" orient="auto">
+    <path d="M8,0 L8,8 L0,4 z" fill="#888"/>
+  </marker>
+  <marker id="arrGrn" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto">
+    <path d="M0,0 L0,8 L8,4 z" fill="#388e3c"/>
+  </marker>
+  <marker id="arrBlu" markerWidth="8" markerHeight="8" refX="4" refY="6" orient="auto">
+    <path d="M4,0 L0,8 L8,8 z" fill="#1565c0"/>
+  </marker>
+  <marker id="arrRed" markerWidth="8" markerHeight="8" refX="4" refY="6" orient="auto">
+    <path d="M4,0 L0,8 L8,8 z" fill="#b71c1c"/>
+  </marker>
+</defs>
+
+<rect width="920" height="1030" fill="#f5f5f5"/>
+
+<!-- ── Title ── -->
+<text x="370" y="33" text-anchor="middle" font-size="20" font-weight="bold" font-family="Arial" fill="#1a1a2e">MiniMind 模型架構圖</text>
+<text x="370" y="53" text-anchor="middle" font-size="12" font-family="Arial" fill="#666">Decoder-only · Pre-LN · Causal LM</text>
+
+<!-- ══════════════════════════════════════
+     LEGEND  (top-right)
+     ══════════════════════════════════════ -->
+<rect x="650" y="64" width="240" height="52" rx="8" fill="#fff" stroke="#ccc" stroke-width="1"/>
+<text x="770" y="82" text-anchor="middle" font-size="11" font-weight="bold" font-family="Arial" fill="#333">顏色圖例（形狀標注）</text>
+<rect x="663" y="90" width="10" height="10" fill="#1565c0" rx="2"/>
+<text x="678" y="100" font-size="11" font-family="Arial" fill="#1565c0">Prefill（seq_len = N）</text>
+<rect x="790" y="90" width="10" height="10" fill="#b71c1c" rx="2"/>
+<text x="805" y="100" font-size="11" font-family="Arial" fill="#b71c1c">Decode（seq_len = 1）</text>
+
+<!-- ══════════════════════════════════════
+     MAIN COLUMN  centre-x=370, box w=230
+     left=255  right=485
+     Arrows point UPWARD (high-y → low-y)
+     ══════════════════════════════════════ -->
+
+<!-- Output Logits -->
+<rect x="255" y="72" width="230" height="36" rx="8" fill="#c8e6c9" stroke="#388e3c" stroke-width="1.5"/>
+<text x="370" y="95" text-anchor="middle" font-size="13" font-weight="bold" font-family="Arial" fill="#1b5e20">Output Logits</text>
+
+<!-- ↑ -->
+<line x1="370" y1="130" x2="370" y2="108" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- LM Head -->
+<rect x="255" y="130" width="230" height="36" rx="8" fill="#e8eaf6" stroke="#5c6bc0" stroke-width="1.5"/>
+<text x="370" y="153" text-anchor="middle" font-size="13" font-family="Arial" fill="#283593">LM Head  (Linear, no bias)</text>
+
+<!-- ↑ -->
+<line x1="370" y1="188" x2="370" y2="166" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Final RMSNorm -->
+<rect x="255" y="188" width="230" height="36" rx="8" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+<text x="370" y="211" text-anchor="middle" font-size="13" font-family="Arial" fill="#4e342e">Final RMSNorm</text>
+
+<!-- ↑ -->
+<line x1="370" y1="252" x2="370" y2="224" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- ══ Nx BLOCK BORDER  y=252..764 ══ -->
+<rect x="152" y="252" width="462" height="512" rx="14" fill="none" stroke="#e53935" stroke-width="2" stroke-dasharray="8,4"/>
+<text x="166" y="275" font-size="14" font-weight="bold" font-family="Arial" fill="#c62828">N ×</text>
+
+<!-- Add & RMSNorm (post-FFN) -->
+<rect x="255" y="272" width="230" height="36" rx="8" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+<text x="370" y="295" text-anchor="middle" font-size="13" font-family="Arial" fill="#4e342e">Add &amp; RMSNorm</text>
+
+<!-- ↑ -->
+<line x1="370" y1="330" x2="370" y2="308" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- FeedForward -->
+<rect x="238" y="330" width="264" height="52" rx="8" fill="#b3e5fc" stroke="#0288d1" stroke-width="1.5"/>
+<text x="370" y="352" text-anchor="middle" font-size="13" font-weight="bold" font-family="Arial" fill="#01579b">FeedForward  (SwiGLU)</text>
+<text x="370" y="370" text-anchor="middle" font-size="11" font-family="Arial" fill="#01579b">gate · SiLU(up) → down_proj   [or MOEFeedForward]</text>
+
+<!-- ↑ -->
+<line x1="370" y1="400" x2="370" y2="382" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Add & RMSNorm (post-Attn) -->
+<rect x="255" y="400" width="230" height="36" rx="8" fill="#fff9c4" stroke="#f9a825" stroke-width="1.5"/>
+<text x="370" y="423" text-anchor="middle" font-size="13" font-family="Arial" fill="#4e342e">Add &amp; RMSNorm</text>
+
+<!-- ↑ -->
+<line x1="370" y1="446" x2="370" y2="436" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- ════════════════════════════════════════════════════
+     GQA ATTENTION  y=446..718  (h=272)
+     核心：在這裡標注 Prefill vs Decode 形狀不對稱
+     ════════════════════════════════════════════════════ -->
+<rect x="198" y="446" width="414" height="272" rx="10" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5"/>
+<text x="405" y="468" text-anchor="middle" font-size="13" font-weight="bold" font-family="Arial" fill="#bf360c">GQA Attention (Grouped-Query)</text>
+
+<!-- ① Q proj -->
+<text x="214" y="488" font-size="11" font-weight="bold" font-family="Arial" fill="#5d4037">① Q proj  +  Apply RoPE [start_pos : start_pos+seq_len]</text>
+<text x="228" y="505" font-size="11" font-family="Arial" fill="#1565c0">Prefill:  Q  [B, N, 8-head, d_head]</text>
+<text x="228" y="520" font-size="11" font-family="Arial" fill="#b71c1c">Decode:  Q  [B, 1, 8-head, d_head]</text>
+
+<!-- divider -->
+<line x1="210" y1="530" x2="600" y2="530" stroke="#e0b080" stroke-width="0.8" stroke-dasharray="4,2"/>
+
+<!-- ② K/V -->
+<text x="214" y="546" font-size="11" font-weight="bold" font-family="Arial" fill="#5d4037">② K,V proj  +  Apply RoPE  +  concat KV Cache</text>
+<text x="228" y="562" font-size="11" font-family="Arial" fill="#37474f">Prefill:  K,V  [B,  N,   kv_heads, d_head]  ← 全部算完後存入 cache</text>
+<text x="228" y="577" font-size="11" font-family="Arial" fill="#37474f">Decode:  K,V  [B, N+i, kv_heads, d_head]  ← 新 token K,V 追加</text>
+
+<!-- divider -->
+<line x1="210" y1="588" x2="600" y2="588" stroke="#e0b080" stroke-width="0.8" stroke-dasharray="4,2"/>
+
+<!-- ③ Attention -->
+<text x="214" y="604" font-size="11" font-weight="bold" font-family="Arial" fill="#5d4037">③ Attention:  Q × Kᵀ / √d_head  (causal mask)</text>
+<text x="228" y="620" font-size="11" font-family="Arial" fill="#1565c0">Prefill:  Q[N]  × K[N]ᵀ   →  N × N  （全序列並行）</text>
+<text x="228" y="635" font-size="11" font-family="Arial" fill="#b71c1c">Decode:  Q[1]  × K[N+i]ᵀ →  1 × (N+i)  （單 token 對全歷史）</text>
+
+<!-- divider -->
+<line x1="210" y1="646" x2="600" y2="646" stroke="#e0b080" stroke-width="0.8" stroke-dasharray="4,2"/>
+
+<!-- ④ O proj -->
+<text x="214" y="662" font-size="11" font-weight="bold" font-family="Arial" fill="#5d4037">④ O proj  +  Residual Dropout</text>
+<text x="214" y="700" font-size="10" font-style="italic" font-family="Arial" fill="#bf360c">Pre-LN: input_layernorm 在進入前執行；post_attention_layernorm 在 FFN 前執行</text>
+
+<!-- ↑ block-input line (long, inside block) -->
+<line x1="370" y1="754" x2="370" y2="718" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- RoPE circle -->
+<ellipse cx="128" cy="570" rx="46" ry="30" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5"/>
+<text x="128" y="562" text-anchor="middle" font-size="11" font-family="Arial" fill="#1b5e20">RoPE</text>
+<text x="128" y="576" text-anchor="middle" font-size="9" font-family="Arial" fill="#1b5e20">Prefill: 0..N-1</text>
+<text x="128" y="589" text-anchor="middle" font-size="9" font-family="Arial" fill="#1b5e20">Decode: N+i</text>
+<line x1="174" y1="570" x2="196" y2="570" stroke="#388e3c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrGrn)"/>
+
+<!-- ══ Residual bypass lines ══ -->
+<!-- Attn residual: tap at y=736, bypass GQA, into Add&Norm(Attn) right -->
+<line x1="370" y1="736" x2="516" y2="736" stroke="#888" stroke-width="1.5"/>
+<line x1="516" y1="736" x2="516" y2="418" stroke="#888" stroke-width="1.5"/>
+<line x1="516" y1="418" x2="485" y2="418" stroke="#888" stroke-width="1.5" marker-end="url(#arrGL)"/>
+
+<!-- FFN residual: tap at Add&Norm(Attn) top y=400, bypass FFN, into Add&Norm(FFN) right -->
+<line x1="485" y1="400" x2="536" y2="400" stroke="#888" stroke-width="1.5"/>
+<line x1="536" y1="400" x2="536" y2="290" stroke="#888" stroke-width="1.5"/>
+<line x1="536" y1="290" x2="485" y2="290" stroke="#888" stroke-width="1.5" marker-end="url(#arrGL)"/>
+
+<!-- ══ END Nx BLOCK ══ -->
+
+<!-- ↑ Dropout → block -->
+<line x1="370" y1="778" x2="370" y2="764" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Dropout -->
+<rect x="255" y="778" width="230" height="36" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
+<text x="370" y="801" text-anchor="middle" font-size="13" font-family="Arial" fill="#4a148c">Dropout</text>
+
+<!-- ↑ -->
+<line x1="370" y1="836" x2="370" y2="814" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Token Embedding -->
+<rect x="255" y="836" width="230" height="36" rx="8" fill="#fce4ec" stroke="#c2185b" stroke-width="1.5"/>
+<text x="370" y="856" text-anchor="middle" font-size="12" font-family="Arial" fill="#880e4f">Token Embedding</text>
+<text x="370" y="870" text-anchor="middle" font-size="10" font-family="Arial" fill="#880e4f">(vocab_size=6400 → hidden_size=512)</text>
+
+<!-- ↑ -->
+<line x1="370" y1="900" x2="370" y2="872" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+<!-- Input Tokens (taller, shows shape) -->
+<rect x="255" y="900" width="230" height="52" rx="8" fill="#fce4ec" stroke="#c2185b" stroke-width="2"/>
+<text x="370" y="920" text-anchor="middle" font-size="13" font-weight="bold" font-family="Arial" fill="#880e4f">Input Tokens</text>
+<text x="316" y="940" font-size="11" font-family="Arial" fill="#1565c0">Prefill: [B, N]</text>
+<text x="420" y="940" font-size="11" font-family="Arial" fill="#b71c1c">Decode: [B, 1]</text>
+
+<!-- weight tying dashed left -->
+<line x1="255" y1="148" x2="222" y2="148" stroke="#9c27b0" stroke-width="1" stroke-dasharray="3,2"/>
+<line x1="222" y1="148" x2="222" y2="854" stroke="#9c27b0" stroke-width="1" stroke-dasharray="3,2"/>
+<line x1="222" y1="854" x2="255" y2="854" stroke="#9c27b0" stroke-width="1" stroke-dasharray="3,2"/>
+<text x="210" y="504" font-size="9" font-family="Arial" fill="#9c27b0" transform="rotate(-90,210,504)">weight tying (embed ↔ lm_head)</text>
+
+<!-- ══════════════════════════════════════
+     RIGHT PANEL：Prefill vs Decode 流程圖
+     x=648..908  y=252..764
+     ══════════════════════════════════════ -->
+<rect x="648" y="252" width="256" height="512" rx="12" fill="#fff" stroke="#455a64" stroke-width="1.5"/>
+<text x="776" y="276" text-anchor="middle" font-size="12" font-weight="bold" font-family="Arial" fill="#263238">推理兩階段流程</text>
+
+<!-- ─── Prefill flow ─── -->
+<rect x="660" y="288" width="232" height="22" rx="4" fill="#e3f2fd" stroke="#1565c0" stroke-width="1"/>
+<text x="776" y="304" text-anchor="middle" font-size="12" font-weight="bold" font-family="Arial" fill="#0d47a1">① Prefill（只做一次）</text>
+
+<rect x="668" y="318" width="216" height="32" rx="5" fill="#e3f2fd" stroke="#1565c0" stroke-width="1"/>
+<text x="776" y="338" text-anchor="middle" font-size="11" font-family="Arial" fill="#0d47a1">Input: [T₁, T₂, …, Tₙ]   seq=N</text>
+
+<line x1="776" y1="350" x2="776" y2="362" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrBlu)"/>
+
+<rect x="668" y="362" width="216" height="32" rx="5" fill="#bbdefb" stroke="#1565c0" stroke-width="1"/>
+<text x="776" y="382" text-anchor="middle" font-size="11" font-family="Arial" fill="#0d47a1">計算全部 N 個 K, V</text>
+
+<line x1="776" y1="394" x2="776" y2="406" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrBlu)"/>
+
+<rect x="668" y="406" width="216" height="32" rx="5" fill="#bbdefb" stroke="#1565c0" stroke-width="1"/>
+<text x="776" y="426" text-anchor="middle" font-size="11" font-family="Arial" fill="#0d47a1">KV Cache 填滿（N 筆）</text>
+
+<line x1="776" y1="438" x2="776" y2="450" stroke="#1565c0" stroke-width="1.5" marker-end="url(#arrBlu)"/>
+
+<rect x="668" y="450" width="216" height="32" rx="5" fill="#c8e6c9" stroke="#2e7d32" stroke-width="1"/>
+<text x="776" y="470" text-anchor="middle" font-size="11" font-family="Arial" fill="#1b5e20">logit[N] → 採樣第 1 個新 token</text>
+
+<!-- ─── arrow to Decode ─── -->
+<line x1="776" y1="482" x2="776" y2="496" stroke="#455a64" stroke-width="1.5" marker-end="url(#arr)"/>
+<text x="820" y="492" font-size="10" font-family="Arial" fill="#455a64">交棒</text>
+
+<!-- ─── Decode flow ─── -->
+<rect x="660" y="496" width="232" height="22" rx="4" fill="#fbe9e7" stroke="#b71c1c" stroke-width="1"/>
+<text x="776" y="512" text-anchor="middle" font-size="12" font-weight="bold" font-family="Arial" fill="#b71c1c">② Decode（逐 token 循環）</text>
+
+<rect x="668" y="526" width="216" height="32" rx="5" fill="#fbe9e7" stroke="#b71c1c" stroke-width="1"/>
+<text x="776" y="546" text-anchor="middle" font-size="11" font-family="Arial" fill="#b71c1c">Input: [Tₙ₊ᵢ]   seq=1</text>
+
+<line x1="776" y1="558" x2="776" y2="570" stroke="#b71c1c" stroke-width="1.5" marker-end="url(#arrRed)"/>
+
+<rect x="668" y="570" width="216" height="32" rx="5" fill="#ffcdd2" stroke="#b71c1c" stroke-width="1"/>
+<text x="776" y="590" text-anchor="middle" font-size="11" font-family="Arial" fill="#b71c1c">新 K,V 追加到 Cache</text>
+
+<line x1="776" y1="602" x2="776" y2="614" stroke="#b71c1c" stroke-width="1.5" marker-end="url(#arrRed)"/>
+
+<rect x="668" y="614" width="216" height="32" rx="5" fill="#ffcdd2" stroke="#b71c1c" stroke-width="1"/>
+<text x="776" y="634" text-anchor="middle" font-size="11" font-family="Arial" fill="#b71c1c">Q[1] × K[N+i]ᵀ → 下一 token</text>
+
+<!-- loop arrow -->
+<line x1="884" y1="630" x2="900" y2="630" stroke="#b71c1c" stroke-width="1.5"/>
+<line x1="900" y1="630" x2="900" y2="541" stroke="#b71c1c" stroke-width="1.5"/>
+<line x1="900" y1="541" x2="884" y2="541" stroke="#b71c1c" stroke-width="1.5" marker-end="url(#arrGL)"/>
+<text x="906" y="592" font-size="10" font-family="Arial" fill="#b71c1c" transform="rotate(90,906,592)">loop</text>
+
+<!-- until eos -->
+<line x1="776" y1="646" x2="776" y2="658" stroke="#b71c1c" stroke-width="1.5" marker-end="url(#arrRed)"/>
+<rect x="668" y="658" width="216" height="32" rx="5" fill="#fce4ec" stroke="#880e4f" stroke-width="1"/>
+<text x="776" y="678" text-anchor="middle" font-size="11" font-family="Arial" fill="#880e4f">遇到 eos_token 或 max_len 停止</text>
+
+<!-- connector from GQA KV Cache → right panel -->
+<line x1="612" y1="562" x2="645" y2="562" stroke="#e65100" stroke-width="1.2" stroke-dasharray="5,3"/>
+<polygon points="643,558 651,562 643,566" fill="#e65100"/>
+<text x="626" y="555" text-anchor="middle" font-size="9" font-family="Arial" fill="#e65100">② KV</text>
+
+<!-- ══ Bottom bar ══ -->
+<rect x="40" y="974" width="840" height="38" rx="6" fill="#eceff1" stroke="#90a4ae" stroke-width="1"/>
+<text x="460" y="990" text-anchor="middle" font-size="10" font-weight="bold" font-family="Arial" fill="#455a64">MiniMindConfig 預設超參數</text>
+<text x="460" y="1005" text-anchor="middle" font-size="10" font-family="Arial" fill="#546e7a">hidden=512 · layers=8 · heads=8 · kv_heads=2 · vocab=6400 · max_pos=32768 · rope_theta=1e6 (YaRN) · act=SiLU · flash_attn=True</text>
+
+</svg>
+</body>
+</html>
